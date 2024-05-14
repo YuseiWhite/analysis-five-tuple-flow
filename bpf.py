@@ -22,6 +22,7 @@ bpf_text = """
 
 #define DEBUG_BUILD
 #define NUM_PACKETS 100
+#define LOCAL_MAC_IP 0x0A2A00B2
 
 struct pkt_key_t {
   u32 protocol;
@@ -42,6 +43,8 @@ struct pkt_leaf_t {
   u32 tot_len_bytes;
   u32 ip_header_length;
   u32 transport_header_length;
+  u64 interarrival_time;
+  u32 direction;
 };
 
 BPF_TABLE("lru_hash", struct pkt_key_t, struct pkt_leaf_t, sessions, 1024);
@@ -70,6 +73,9 @@ int record_packet(struct xdp_md *ctx) {
     if (data + nh_off > data_end) {
       return XDP_DROP;
     }
+    if (eth->h_proto != htons(ETH_P_IP)) {
+      return XDP_PASS;
+    }
     switch(eth->h_proto) {
       case htons(ETH_P_IP): goto ip;
       default: goto EOP;
@@ -80,6 +86,18 @@ int record_packet(struct xdp_md *ctx) {
     if ((void*)&iph[1] > data_end) {
       return XDP_DROP;
     }
+    if (iph->saddr != htonl(LOCAL_MAC_IP)) {
+      return XDP_PASS;
+    }
+
+    // bpf_trace_printk("Source IP: %x\\n", iph->saddr);
+
+    if (iph->saddr == htonl(LOCAL_MAC_IP)) {
+        pkt_val.direction = 1; // 受信
+    } else {
+        pkt_val.direction = 0; // 送信
+    }
+
     pkt_key.saddr    = iph->saddr;
     pkt_key.daddr    = iph->daddr;
     pkt_key.protocol = iph->protocol;
@@ -131,32 +149,42 @@ int record_packet(struct xdp_md *ctx) {
       zero.dport = pkt_key.dport;
       zero.saddr = pkt_key.saddr;
       zero.daddr = pkt_key.daddr;
-      zero.num_packets = 0;
+      zero.num_packets = 1; // for the initial packet to calc interarrival time
       zero.last_packet_timestamp = ts;
       zero.packet_size = 0;
       zero.tot_len_bytes = 0;
+      zero.interarrival_time = 0;
+      // zero.direction = (iph->saddr == htonl(LOCAL_MAC_IP)) ? 0 : 1;
+      zero.direction = pkt_val.direction;
       sessions.update(&pkt_key, &zero);
       pkt_leaf = sessions.lookup(&pkt_key);
-    }
+    } 
     if (pkt_leaf != NULL) {
       pkt_leaf->num_packets += 1;
       int64_t sport = pkt_leaf->sport;
       int64_t dport = pkt_leaf->dport;
       int64_t protocol = iph->protocol;
       int64_t tot_len = ntohs(iph->tot_len);
-      int64_t interval_time = 0;
-      if (pkt_leaf->last_packet_timestamp > 0) {
-        interval_time = ts - pkt_leaf->last_packet_timestamp;
+
+      int64_t time_diff = ts - pkt_leaf->last_packet_timestamp;
+      if (time_diff < 0) {
+        if (-time_diff > 10) {
+          bpf_trace_printk("Significant timestamp reversal detected: current ts %lu, last ts %lu\\n", ts, pkt_leaf->last_packet_timestamp);
+          return XDP_DROP;
+        }
+      } else {
+        pkt_leaf->interarrival_time = time_diff;
       }
       pkt_leaf->last_packet_timestamp = ts;
 
       pkt_leaf->tot_len_bytes = ntohs(iph->tot_len);
       pkt_leaf->packet_size = pkt_val.packet_size;
-
       pkt_leaf->ip_header_length = pkt_val.ip_header_length;
       pkt_leaf->transport_header_length = pkt_val.transport_header_length;
 
-      int64_t direction = pkt_key.sport == sport;
+      pkt_leaf->direction = pkt_val.direction;
+
+      // pkt_leaf->direction = pkt_key.sport == sport;
       sessions.update(&pkt_key, pkt_leaf);
 
       // ADD RAW PACKET COLLECTION PROGRAM
@@ -175,7 +203,7 @@ int record_packet(struct xdp_md *ctx) {
 
 if __name__ == '__main__':
 
-    # example: `sudo python3 test.py wlp0s20f3 -S`
+    # example: `sudo python3 bpf.py wlp0s20f3 -S`
     if len(sys.argv) < 2 or len(sys.argv) > 3:
         usage()
     device = sys.argv[1]
@@ -199,50 +227,38 @@ if __name__ == '__main__':
         b.attach_xdp(device, fn=fn, flags=flags)
 
         sessions = b.get_table("sessions")
-        # print("sessions", sessions)
+        
+        five_tuple_flow_list = []
 
-
-        prev = 0
         while True:
             try:
                 dt = time.strftime("%H:%M:%S")
 
-                """
-                - k
-                struct pkt_key_t {
-                    u32 protocol;
-                    u32 saddr;
-                    u32 daddr;
-                    u32 sport;
-                    u32 dport;
-                };last_packet_timestamp
-
-                - v
-                struct pkt_leaf_t {
-                    u32 num_packets;
-                    u64 last_packet_timestamp;
-                    u32 saddr;
-                    u32 daddr;
-                    u32 sport;
-                    u32 dport;
-                    u32 packet_size;
-                };
-                """
-
                 for k, v in sessions.items():
-                    print("bytes of ip header length:", v.ip_header_length)
-                    print("bytes of transport header length:", v.transport_header_length)
-                    print("bytes of tot_len:", v.tot_len_bytes)
-                    print("packet_size:", v.packet_size) # already removed header, $ sudo tcpdump -i wlp0s20f3 -vvv
-                    print()
+                    if v.interarrival_time > 1:
+                      # packet size
+                      # print("packet_size:", v.packet_size) # $ sudo tcpdump -i wlp0s20f3 -vvv
 
-                    prev = v.last_packet_timestamp
+                      # # interarrival time
+                      # print("interarrival time: ", v.interarrival_time)
 
-                    # print(dt, k.saddr, k.sport, k.daddr, k.dport, k.protocol, v.last_packet_timestamp, v.num_packets, v.packet_size)
-                    # print(dt, k.protocol)
+                      # # direction
+                      # print("direction:", v.direction)
+                      
+                      # # protocol
+                      # print("transport protocol:", k.protocol)
 
-                    # if prev != 0:
-                    #     print("interarrval_time", v.last_packet_timestamp - prev)
+                      five_tuple_flow_dict = {
+                        "packet_size": v.packet_size,
+                        "interarrival_time": v.interarrival_time,
+                        "direction": v.direction,
+                        "trasnport_protocol": k.protocol
+                      }
+                      five_tuple_flow_list.append(five_tuple_flow_dict)
+
+                      if len(five_tuple_flow_list) >= 16:
+                        break
+
                 time.sleep(1)
             except KeyboardInterrupt:
                 break
