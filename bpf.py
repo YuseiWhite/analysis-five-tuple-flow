@@ -202,6 +202,7 @@ int record_packet(struct xdp_md *ctx) {
 """
 
 if __name__ == '__main__':
+    print("start processing")
 
     # example: `sudo python3 bpf.py wlp0s20f3 -S`
     if len(sys.argv) < 2 or len(sys.argv) > 3:
@@ -230,7 +231,9 @@ if __name__ == '__main__':
         
         five_tuple_flow_list = []
 
-        while True:
+        break_while = False
+
+        while not break_while:
             try:
                 dt = time.strftime("%H:%M:%S")
 
@@ -252,16 +255,61 @@ if __name__ == '__main__':
                         "packet_size": v.packet_size,
                         "interarrival_time": v.interarrival_time,
                         "direction": v.direction,
-                        "trasnport_protocol": k.protocol
+                        "transport_protocol": k.protocol
                       }
                       five_tuple_flow_list.append(five_tuple_flow_dict)
 
-                      if len(five_tuple_flow_list) >= 16:
+                      # production env is 256?
+                      if len(five_tuple_flow_list) >= 256:
+                        break_while = True
                         break
 
                 time.sleep(1)
             except KeyboardInterrupt:
                 break
 
+        print(five_tuple_flow_list)
+        print()
+        print(len(five_tuple_flow_list))
+
+        import sys
+        sys.path.append('/home/ubuntu/.pyenv/versions/3.10.14/lib/python3.10/site-packages')
+        from PIL import Image
+        import numpy as np
+
+
+        # データの取得と処理
+        packet_sizes = np.array([d['packet_size'] for d in five_tuple_flow_list])
+        interarrival_times = np.array([d['interarrival_time'] for d in five_tuple_flow_list])
+        protocols = np.array([d['transport_protocol'] for d in five_tuple_flow_list])
+
+        # データの正規化
+        normalized_sizes = (packet_sizes - packet_sizes.min()) / (packet_sizes.max() - packet_sizes.min())
+        normalized_times = (interarrival_times - interarrival_times.min()) / (interarrival_times.max() - interarrival_times.min())
+
+        # 画像のサイズを決定
+        img_size = int(np.ceil(np.sqrt(len(five_tuple_flow_list))))
+
+        # 画像データの初期化
+        image = Image.new('RGB', (img_size, img_size))
+
+        index = 0
+        for i in range(img_size):
+            for j in range(img_size):
+                if index < len(five_tuple_flow_list):
+                    # 色の設定: 赤色をTCP, 青色をUDPとする
+                    color = (255, 0, 0) if protocols[index] == 6 else (0, 0, 255)
+                    # 明るさの調整: パケットサイズとインターアライバルタイムの平均値を用いる
+                    brightness = int((normalized_sizes[index] + normalized_times[index]) / 2 * 255)
+                    color = tuple(min(max(c, 0), 255) for c in color)  # RGB値が255を超えないように調整
+                    image.putpixel((i, j), color)
+                index += 1
+
+        # 画像の表示
+        image.show()
+
+        print("processed sucessfully!")
+
     finally:
         b.remove_xdp(device, flags)
+        print("finished pbf program")
