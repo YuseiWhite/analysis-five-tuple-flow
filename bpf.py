@@ -125,7 +125,8 @@ int record_packet(struct xdp_md *ctx) {
     pkt_key.dport = ntohs(th->dest);
 
     pkt_val.packet_size = ntohs(iph->tot_len) - pkt_val.ip_header_length - pkt_val.transport_header_length;
-    goto record;
+    // goto record; // ignored tcp right now
+    goto EOP;
   }
   udp: {
     uh = (struct udphdr *)((char*)iph + ip_header_length);
@@ -204,6 +205,11 @@ int record_packet(struct xdp_md *ctx) {
 if __name__ == '__main__':
     print("start processing")
 
+    data_name = input("What application analysis do you want to see?: ")
+    # you should change all cha to lowercase
+    print(data_name)
+    # make a json file naming `data_name` to store data from IP packets
+
     # example: `sudo python3 bpf.py wlp0s20f3 -S`
     if len(sys.argv) < 2 or len(sys.argv) > 3:
         usage()
@@ -222,6 +228,7 @@ if __name__ == '__main__':
             offload_device = device
             flags |= BPF.XDP_FLAGS_HW_MODE
     b = BPF(text=bpf_text)
+
 
     try:
         fn = b.load_func("record_packet", BPF.XDP)
@@ -257,55 +264,59 @@ if __name__ == '__main__':
                         "direction": v.direction,
                         "transport_protocol": k.protocol
                       }
+                      print(five_tuple_flow_dict)
                       five_tuple_flow_list.append(five_tuple_flow_dict)
 
-                      # production env is 256?
-                      if len(five_tuple_flow_list) >= 256:
+                      num_of_pixel = 256
+                      if len(five_tuple_flow_list) >= (num_of_pixel * num_of_pixel):
                         break_while = True
                         break
 
-                time.sleep(1)
+                # time.sleep(1)
             except KeyboardInterrupt:
                 break
 
-        print(five_tuple_flow_list)
-        print()
-        print(len(five_tuple_flow_list))
+        # print(five_tuple_flow_list)
+        # print()
+        # print(len(five_tuple_flow_list))
 
         import sys
         sys.path.append('/home/ubuntu/.pyenv/versions/3.10.14/lib/python3.10/site-packages')
         from PIL import Image
         import numpy as np
 
-
         # データの取得と処理
         packet_sizes = np.array([d['packet_size'] for d in five_tuple_flow_list])
         interarrival_times = np.array([d['interarrival_time'] for d in five_tuple_flow_list])
         protocols = np.array([d['transport_protocol'] for d in five_tuple_flow_list])
+        directions = np.array([d['direction'] for d in five_tuple_flow_list])  # direction情報の取得
 
-        # データの正規化
-        normalized_sizes = (packet_sizes - packet_sizes.min()) / (packet_sizes.max() - packet_sizes.min())
-        normalized_times = (interarrival_times - interarrival_times.min()) / (interarrival_times.max() - interarrival_times.min())
+        # データの正規化（最大値を特定値に固定する）
+        normalized_sizes = packet_sizes * 255 / 1514  # packet size最大値を2000で255に正規化
+        normalized_times = interarrival_times * 255 / 1e9 # interarrival time最大値を2000000000で255に正規化
 
-        # 画像のサイズを決定
-        img_size = int(np.ceil(np.sqrt(len(five_tuple_flow_list))))
+        # 画像のサイズ変更（256x256に設定）
+        img_size = num_of_pixel  # 画像サイズを256x256に変更
 
         # 画像データの初期化
-        image = Image.new('RGB', (img_size, img_size))
+        image = Image.new('RGBA', (img_size, img_size))  # 透明度を考慮してRGBAモードに変更
 
         index = 0
         for i in range(img_size):
             for j in range(img_size):
                 if index < len(five_tuple_flow_list):
-                    # 色の設定: 赤色をTCP, 青色をUDPとする
-                    color = (255, 0, 0) if protocols[index] == 6 else (0, 0, 255)
-                    # 明るさの調整: パケットサイズとインターアライバルタイムの平均値を用いる
-                    brightness = int((normalized_sizes[index] + normalized_times[index]) / 2 * 255)
-                    color = tuple(min(max(c, 0), 255) for c in color)  # RGB値が255を超えないように調整
+                    # 赤色の設定: TCPのとき255, UDPのとき0
+                    red = 0 if protocols[index] == 6 else 255  # TCPは赤255, UDPは赤0
+                    # 透明度の設定: directionが1なら100%, 0なら10%
+                    alpha = 255 if directions[index] == 1 else 25  # 透明度を100%または10%に設定
+                    # 色の設定
+                    color = (red, int(normalized_sizes[index]), int(normalized_times[index]), alpha)
                     image.putpixel((i, j), color)
                 index += 1
 
         # 画像の表示
+        print("making the image!")
+        image.save(f"{data_name}.PNG")
         image.show()
 
         print("processed sucessfully!")
@@ -313,3 +324,4 @@ if __name__ == '__main__':
     finally:
         b.remove_xdp(device, flags)
         print("finished pbf program")
+
