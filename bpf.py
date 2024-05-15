@@ -3,6 +3,7 @@
 
 
 from bcc import BPF
+import json
 import sys
 import time
 from socket import inet_ntop, ntohs, AF_INET, AF_INET6
@@ -23,9 +24,7 @@ def main():
     print("start processing")
 
     data_name = input("What application analysis do you want to see?: ")
-    # you should change all cha to lowercase
-    print(data_name)
-    # make a json file naming `data_name` to store data from IP packets
+    data_file_path = f"data/{data_name.lower()}.json"
 
     # example: `sudo python3 bpf.py wlp0s20f3 -S`
     if len(sys.argv) < 2 or len(sys.argv) > 3:
@@ -81,10 +80,10 @@ def main():
                         "direction": v.direction,
                         "transport_protocol": k.protocol
                       }
-                      print(five_tuple_flow_dict)
+                    #   print(five_tuple_flow_dict)
                       five_tuple_flow_list.append(five_tuple_flow_dict)
 
-                      num_of_pixel = 256
+                      num_of_pixel = 512
                       if len(five_tuple_flow_list) >= (num_of_pixel * num_of_pixel):
                         break_while = True
                         break
@@ -96,6 +95,10 @@ def main():
         # print(five_tuple_flow_list)
         # print()
         # print(len(five_tuple_flow_list))
+
+        with open(data_file_path, 'w') as json_file:
+            json.dump(five_tuple_flow_list, json_file, indent=4)
+        print(f"saved data of five tuple flow to {data_file_path}!")
 
         analyze_and_save(data_name, num_of_pixel, five_tuple_flow_list)
 
