@@ -12,6 +12,7 @@ import ctypes as ct
 
 from analyze import analyze_and_save
 
+# example: `sudo python3 bpf.py wlp0s20f3 -S`
 def main():
     def usage():
         print("Usage: {0} <ifdev> <flag>".format(sys.argv[0]))
@@ -26,7 +27,6 @@ def main():
     data_name = input("What application analysis do you want to see?: ")
     data_file_path = f"data/{data_name.lower()}.json"
 
-    # example: `sudo python3 bpf.py wlp0s20f3 -S`
     if len(sys.argv) < 2 or len(sys.argv) > 3:
         usage()
     device = sys.argv[1]
@@ -51,9 +51,8 @@ def main():
         b.attach_xdp(device, fn=fn, flags=flags)
 
         sessions = b.get_table("sessions")
-        
-        five_tuple_flow_list = []
 
+        five_tuple_flow_list = []
         break_while = False
 
         while not break_while:
@@ -62,25 +61,12 @@ def main():
 
                 for k, v in sessions.items():
                     if v.interarrival_time > 1:
-                      # packet size
-                      # print("packet_size:", v.packet_size) # $ sudo tcpdump -i wlp0s20f3 -vvv
-
-                      # # interarrival time
-                      # print("interarrival time: ", v.interarrival_time)
-
-                      # # direction
-                      # print("direction:", v.direction)
-                      
-                      # # protocol
-                      # print("transport protocol:", k.protocol)
-
                       five_tuple_flow_dict = {
                         "packet_size": v.packet_size,
                         "interarrival_time": v.interarrival_time,
                         "direction": v.direction,
                         "transport_protocol": k.protocol
                       }
-                    #   print(five_tuple_flow_dict)
                       five_tuple_flow_list.append(five_tuple_flow_dict)
 
                       num_of_pixel = 512
@@ -91,10 +77,6 @@ def main():
                 # time.sleep(1)
             except KeyboardInterrupt:
                 break
-
-        # print(five_tuple_flow_list)
-        # print()
-        # print(len(five_tuple_flow_list))
 
         with open(data_file_path, 'w') as json_file:
             json.dump(five_tuple_flow_list, json_file, indent=4)
