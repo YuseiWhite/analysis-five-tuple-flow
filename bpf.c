@@ -6,7 +6,7 @@
 
 #define DEBUG_BUILD
 #define NUM_PACKETS 100
-#define LOCAL_MAC_IP 0x0A2A00B2
+#define LOCAL_MAC_IP 0x0A2A00B2 // IP Address of My Macbook
 
 struct pkt_key_t {
   u32 protocol;
@@ -74,12 +74,10 @@ int record_packet(struct xdp_md *ctx) {
       return XDP_PASS;
     }
 
-    // bpf_trace_printk("Source IP: %x\\n", iph->saddr);
-
     if (iph->saddr == htonl(LOCAL_MAC_IP)) {
-        pkt_val.direction = 1; // 受信
+        pkt_val.direction = 1; // reception
     } else {
-        pkt_val.direction = 0; // 送信
+        pkt_val.direction = 0; // transmission
     }
 
     pkt_key.saddr    = iph->saddr;
@@ -139,7 +137,6 @@ int record_packet(struct xdp_md *ctx) {
       zero.packet_size = 0;
       zero.tot_len_bytes = 0;
       zero.interarrival_time = 0;
-      // zero.direction = (iph->saddr == htonl(LOCAL_MAC_IP)) ? 0 : 1;
       zero.direction = pkt_val.direction;
       sessions.update(&pkt_key, &zero);
       pkt_leaf = sessions.lookup(&pkt_key);
@@ -169,10 +166,7 @@ int record_packet(struct xdp_md *ctx) {
 
       pkt_leaf->direction = pkt_val.direction;
 
-      // pkt_leaf->direction = pkt_key.sport == sport;
       sessions.update(&pkt_key, pkt_leaf);
-
-      // ADD RAW PACKET COLLECTION PROGRAM
 
       return XDP_PASS;
     } else {
