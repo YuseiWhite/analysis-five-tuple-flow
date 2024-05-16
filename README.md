@@ -31,5 +31,6 @@ Video:
 - Twitch 1080p HD (live) 
 ![twitch-1080hd-2048-a-live-02](https://github.com/YuseiWhite/analysis-five-tuple-flow/assets/82315017/0cfde1ab-4dfa-428f-8f23-d2e31a82bd9c)
 
-
+## License
+This research and experiments are licensed under the Apache License 2.0 - see the LICENSE file for details.
 
