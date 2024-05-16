@@ -55,6 +55,9 @@ def main():
         five_tuple_flow_list = []
         break_while = False
 
+        # you can change this num
+        num_of_pixel = 2048
+
         while not break_while:
             try:
                 dt = time.strftime("%H:%M:%S")
@@ -81,7 +84,6 @@ def main():
             json.dump(five_tuple_flow_list, json_file, indent=4)
         print(f"saved data of five tuple flow to {data_file_path}!")
 
-        num_of_pixel = 2048
         analyze_and_save(data_name, num_of_pixel, five_tuple_flow_list)
 
         print("processed sucessfully!")
